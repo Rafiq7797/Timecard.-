@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weekly Time Card</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #1d4ed8;
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --text-color: #1e293b;
+            --border-color: #e2e8f0;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--text-color);
+            margin-bottom: 30px;
+        }
+
+        .date-range {
+            text-align: center;
+            margin-bottom: 20px;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        th, td {
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        th {
+            background-color: #f1f5f9;
+            font-weight: 600;
+        }
+
+        input[type="time"], input[type="text"] {
+            width: 90%;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .actions {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: var(--secondary-color);
+        }
+
+        button.secondary {
+            background-color: #64748b;
+        }
+
+        button.secondary:hover {
+            background-color: #475569;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Weekly Time Card</h1>
+    <div class="date-range" id="dateRangeDisplay">Week: Calculating...</div>
+
+    <form id="timeCardForm">
+        <table>
+            <thead>
+                <tr>
+                    <th>Day</th>
+                    <th>Date</th>
+                    <th>Clock In</th>
+                    <th>Clock Out</th>
+                    <th>Total Hours</th>
+                </tr>
+            </thead>
+            <tbody id="timeCardBody">
+                <!-- Rows will be injected by JavaScript -->
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="4" style="text-align: right; font-weight: 600;">Grand Total:</td>
+                    <td id="grandTotal" style="font-weight: 600;">0.00</td>
+                </tr>
+            </tfoot>
+        </table>
+
+        <div class="actions">
+            <button type="button" class="secondary" onclick="calculateTotal()">Calculate Hours</button>
+            <button type="button" onclick="generatePDF()">Download PDF</button>
+        </div>
+    </form>
+</div>
+
+<script>
+    const daysOfWeek = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    
+    // Helper to get the most recent Saturday to the following Friday
+    function getDateRange() {
+        const today = new Date();
+        const currentDay = today.getDay(); // 0 is Sunday, 6 is Saturday
+        
+        // Calculate days to subtract to get to the most recent Saturday
+        // If today is Saturday (6), diff is 0.
+        // If today is Friday (5), we want the Saturday 6 days ago.
+        let diff = (currentDay + 1) % 7; 
+        
+        // If we are looking for the Saturday that just passed
+        const startSaturday = new Date(today);
+        startSaturday.setDate(today.getDate() - diff);
+        startSaturday.setHours(0,0,0,0);
+
+        const endFriday = new Date(startSaturday);
+        endFriday.setDate(startSaturday.getDate() + 6);
+        endFriday.setHours(23,59,59,999);
+
+        return { startSaturday, endFriday };
+    }
+
+    const { startSaturday, endFriday } = getDateRange();
+    
+    document.getElementById('dateRangeDisplay').innerText = 
+        `Week: ${startSaturday.toLocaleDateString()} - ${endFriday.toLocaleDateString()}`;
+
+    // Initialize the table rows
+    const tableBody = document.getElementById('timeCardBody');
+    const dateCursor = new Date(startSaturday);
+
+    for (let i = 0; i < 7; i++) {
+        const rowDate = new Date(dateCursor);
+        const dateStr = rowDate.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
+        
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${daysOfWeek[i]}</td>
+            <td>${dateStr}</td>
+            <td><input type="time" class="clock-in" onchange="calculateTotal()"></td>
+            <td><input type="time" class="clock-out" onchange="calculateTotal()"></td>
+            <td class="daily-total">0.00</td>
+        `;
+        tableBody.appendChild(row);
+        dateCursor.setDate(dateCursor.getDate() + 1);
+    }
+
+    function calculateTotal() {
+        const rows = document.querySelectorAll('#timeCardBody tr');
+        let grandTotal = 0;
+
+        rows.forEach(row => {
+            const clockIn = row.querySelector('.clock-in').value;
+            const clockOut = row.querySelector('.clock-out').value;
+            const totalCell = row.querySelector('.daily-total');
+
+            if (clockIn && clockOut) {
+                const start = new Date(`1970-01-01T${clockIn}:00Z`);
+                const end = new Date(`1970-01-01T${clockOut}:00Z`);
+                
+                let diff = (end - start) / (1000 * 60 * 60);
+                
+                if (diff < 0) diff = 0; // Handle overnight shifts if needed, simplistic approach
+                
+                totalCell.innerText = diff.toFixed(2);
+                grandTotal += diff;
+            } else {
+                totalCell.innerText = '0.00';
+            }
+        });
+
+        document.getElementById('grandTotal').innerText = grandTotal.toFixed(2);
+    }
+
+    function generatePDF() {
+        calculateTotal(); // Ensure totals are up to date
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        // Title
+        doc.setFontSize(22);
+        doc.setTextColor(30, 41, 59);
+        doc.text("Weekly Time Card", 105, 20, { align: 'center' });
+
+        // Date Range
+        doc.setFontSize(12);
+        doc.setTextColor(37, 99, 235);
+        doc.text(document.getElementById('dateRangeDisplay').innerText, 105, 30, { align: 'center' });
+
+        // Table Data
+        const rows = [];
+        const tableRows = document.querySelectorAll('#timeCardBody tr');
+        
+        tableRows.forEach(row => {
+            const day = row.cells[0].innerText;
+            const date = row.cells[1].innerText;
+            const clockIn = row.querySelector('.clock-in').value || '--:--';
+            const clockOut = row.querySelector('.clock-out').value || '--:--';
+            const total = row.querySelector('.daily-total').innerText;
+            
+            rows.push([day, date, clockIn, clockOut, total]);
+        });
+
+        // AutoTable
+        doc.autoTable({
+            head: [['Day', 'Date', 'Clock In', 'Clock Out', 'Hours']],
+            body: rows,
+            startY: 40,
+            theme: 'striped',
+            headStyles: { fillColor: [37, 99, 235] },
+            didDrawPage: function (data) {
+                // Grand Total Row in Footer
+                const grandTotal = document.getElementById('grandTotal').innerText;
+                doc.setFontSize(12);
+                doc.setFont('helvetica', 'bold');
+                doc.text(`Grand Total Hours: ${grandTotal}`, 195, data.cursor.y + 10, { align: 'right' });
+            }
+        });
+
+        // Save
+        const fileName = `Time_Card_${startSaturday.toLocaleDateString().replace(/\//g, '-')}_to_${endFriday.toLocaleDateString().replace(/\//g, '-')}.pdf`;
+        doc.save(fileName);
+    }
+</script>
+
+</body>
+</html>
+
