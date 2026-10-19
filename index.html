@@ -65,12 +65,13 @@
             font-weight: 600;
         }
 
-        input[type="time"], input[type="text"] {
+        input[type="time"] {
             width: 90%;
             padding: 8px;
             border: 1px solid var(--border-color);
             border-radius: 4px;
             box-sizing: border-box;
+            font-family: inherit;
         }
 
         input:focus {
@@ -127,6 +128,168 @@
                 </tr>
             </thead>
             <tbody id="timeCardBody">
-                <!-- Rows will be injected by JavaScript -->
             </tbody>
             <tfoot>
+                <tr>
+                    <td colspan="4" style="text-align: right; font-weight: 600;">Grand Total:</td>
+                    <td id="grandTotal" style="font-weight: 600;">0.00</td>
+                </tr>
+            </tfoot>
+        </table>
+
+        <div class="actions">
+            <button type="button" class="secondary" onclick="clearData()">Clear Data</button>
+            <button type="button" onclick="generatePDF()">Download PDF</button>
+        </div>
+    </form>
+</div>
+
+<script>
+    const daysOfWeek = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
+    function getDateRange() {
+        const today = new Date();
+        const currentDay = today.getDay();
+        let diff = (currentDay + 1) % 7; 
+        
+        const startSaturday = new Date(today);
+        startSaturday.setDate(today.getDate() - diff);
+        startSaturday.setHours(0,0,0,0);
+
+        const endFriday = new Date(startSaturday);
+        endFriday.setDate(startSaturday.getDate() + 6);
+        endFriday.setHours(23,59,59,999);
+
+        return { startSaturday, endFriday };
+    }
+
+    const { startSaturday, endFriday } = getDateRange();
+    const storageKey = `timecard_${startSaturday.toISOString().split('T')[0]}`;
+
+    document.getElementById('dateRangeDisplay').innerText = 
+        `Week: ${startSaturday.toLocaleDateString()} - ${endFriday.toLocaleDateString()}`;
+
+    const tableBody = document.getElementById('timeCardBody');
+    const dateCursor = new Date(startSaturday);
+    const savedData = JSON.parse(localStorage.getItem(storageKey)) || {};
+
+    for (let i = 0; i < 7; i++) {
+        const rowDate = new Date(dateCursor);
+        const dateStr = rowDate.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
+        const dayName = daysOfWeek[i];
+        
+        const dayData = savedData[dayName] || { clockIn: '', clockOut: '' };
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${dayName}</td>
+            <td>${dateStr}</td>
+            <td><input type="time" class="clock-in" value="${dayData.clockIn}" onchange="saveAndCalculate()"></td>
+            <td><input type="time" class="clock-out" value="${dayData.clockOut}" onchange="saveAndCalculate()"></td>
+            <td class="daily-total">0.00</td>
+        `;
+        tableBody.appendChild(row);
+        dateCursor.setDate(dateCursor.getDate() + 1);
+    }
+
+    calculateTotal();
+
+    function saveAndCalculate() {
+        const rows = document.querySelectorAll('#timeCardBody tr');
+        const dataToSave = {};
+
+        rows.forEach(row => {
+            const day = row.cells[0].innerText;
+            const clockIn = row.querySelector('.clock-in').value;
+            const clockOut = row.querySelector('.clock-out').value;
+            dataToSave[day] = { clockIn, clockOut };
+        });
+
+        localStorage.setItem(storageKey, JSON.stringify(dataToSave));
+        calculateTotal();
+    }
+
+    function calculateTotal() {
+        const rows = document.querySelectorAll('#timeCardBody tr');
+        let grandTotal = 0;
+
+        rows.forEach(row => {
+            const clockIn = row.querySelector('.clock-in').value;
+            const clockOut = row.querySelector('.clock-out').value;
+            const totalCell = row.querySelector('.daily-total');
+
+            if (clockIn && clockOut) {
+                const start = new Date(`1970-01-01T${clockIn}:00Z`);
+                const end = new Date(`1970-01-01T${clockOut}:00Z`);
+                
+                let diff = (end - start) / (1000 * 60 * 60);
+                
+                if (diff < 0) diff = 0; 
+                
+                totalCell.innerText = diff.toFixed(2);
+                grandTotal += diff;
+            } else {
+                totalCell.innerText = '0.00';
+            }
+        });
+
+        document.getElementById('grandTotal').innerText = grandTotal.toFixed(2);
+    }
+
+    function clearData() {
+        if (confirm("Are you sure you want to clear all entered times for this week?")) {
+            localStorage.removeItem(storageKey);
+            document.querySelectorAll('.clock-in, .clock-out').forEach(input => input.value = '');
+            calculateTotal();
+        }
+    }
+
+    function generatePDF() {
+        calculateTotal(); 
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        doc.setFontSize(22);
+        doc.setTextColor(30, 41, 59);
+        doc.text("Weekly Time Card", 105, 20, { align: 'center' });
+
+        doc.setFontSize(12);
+        doc.setTextColor(37, 99, 235);
+        doc.text(document.getElementById('dateRangeDisplay').innerText, 105, 30, { align: 'center' });
+
+        const rows = [];
+        const tableRows = document.querySelectorAll('#timeCardBody tr');
+        
+        tableRows.forEach(row => {
+            const day = row.cells[0].innerText;
+            const date = row.cells[1].innerText;
+            const clockIn = row.querySelector('.clock-in').value || '--:--';
+            const clockOut = row.querySelector('.clock-out').value || '--:--';
+            const total = row.querySelector('.daily-total').innerText;
+            
+            rows.push([day, date, clockIn, clockOut, total]);
+        });
+
+        doc.autoTable({
+            head: [['Day', 'Date', 'Clock In', 'Clock Out', 'Hours']],
+            body: rows,
+            startY: 40,
+            theme: 'striped',
+            headStyles: { fillColor: [37, 99, 235] },
+            didDrawPage: function (data) {
+                const grandTotal = document.getElementById('grandTotal').innerText;
+                doc.setFontSize(12);
+                doc.setFont('helvetica', 'bold');
+                doc.text(`Grand Total Hours: ${grandTotal}`, 195, data.cursor.y + 10, { align: 'right' });
+            }
+        });
+
+        const fileName = `Time_Card_${startSaturday.toLocaleDateString().replace(/\//g, '-')}_to_${endFriday.toLocaleDateString().replace(/\//g, '-')}.pdf`;
+        doc.save(fileName);
+    }
+</script>
+
+</body>
+</html>
+
